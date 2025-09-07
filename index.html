@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Exam Alerts — Strict Topic Filters</title>
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+:root{ --bg:#0f1220; --card:#181c2f; --ink:#eef1ff; --muted:#9aa3c7; --line:#2a3052; --accent:#6ca8ff }
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);
+font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial}
+header,footer{padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+header>h1{margin:0;font-size:18px;font-weight:600}
+.wrap{max-width:1100px;margin:0 auto;padding:12px}
+.panel{background:var(--card);border-radius:12px;padding:14px;box-shadow:0 0 0 1px var(--line)}
+.pills{display:flex;flex-wrap:wrap;gap:8px}
+.pill{padding:6px 10px;border-radius:999px;background:#13172a;border:1px solid var(--line);
+  color:var(--ink);font-size:13px;cursor:pointer;user-select:none}
+.pill.active{outline:2px solid var(--accent)}
+.controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}
+select,button,input[type="text"]{
+  background:#11162a;border:1px solid var(--line);color:var(--ink);
+  padding:6px 10px;border-radius:8px;font-size:13px
+}
+button.primary{background:var(--accent);border-color:transparent;color:#06142e}
+.list{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+.item{background:#13172a;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.item h3{margin:0 0 4px 0;font-size:15px}
+.item small{color:var(--muted)}
+.badge{font-size:11px;color:#cfe2ff;background:#0e325a;border:1px solid #1a4a83;
+  padding:2px 6px;border-radius:999px;margin-left:6px}
+.right{margin-left:auto}
+.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.kbd{padding:2px 6px;border:1px solid var(--line);border-bottom-width:2px;border-radius:6px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:var(--muted)}
+a{color:#9fc7ff;text-decoration:none}
+.note{color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<header class="wrap">
+  <h1>Exam Alerts — Strict</h1>
+  <span class="note">Keeps same Google feeds, but: Notifications = official domains only + tighter keywords.</span>
+  <span class="right"></span>
+</header>
+
+<div class="wrap">
+  <div class="panel">
+    <div class="bar"><strong>Topics:</strong><div id="topics" class="pills"></div></div>
+    <div class="controls">
+      <label>Newer than
+        <select id="age">
+          <option value="24">24 hours</option>
+          <option value="72">3 days</option>
+          <option value="168">7 days</option>
+          <option value="0">Any time</option>
+        </select>
+      </label>
+      <label><input id="dedupe" type="checkbox" checked> De-duplicate</label>
+      <label><input id="autorefresh" type="checkbox" checked> Auto refresh (5 min)</label>
+      <button id="notifyBtn" class="primary">Enable Notifications</button>
+      <input id="searchBox" type="text" placeholder="Filter (JE, CGL, '2025', ...)" />
+      <button id="refreshBtn">Refresh</button>
+      <button id="exportBtn">Export</button>
+      <input id="importFile" type="file" accept=".json" style="display:none" />
+      <button id="importBtn">Import</button>
+      <span class="right kbd" id="status">Idle</span>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:12px">
+    <div class="bar"><strong>Tags (Boards/Exams):</strong><div id="tags" class="pills"></div></div>
+  </div>
+
+  <div class="panel" style="margin-top:12px">
+    <div class="bar"><strong>Results</strong><span class="badge" id="count">0</span></div>
+    <div id="list" class="list"></div>
+  </div>
+</div>
+
+<footer class="wrap"><span class="note">Install as PWA for quick access. True push requires a server.</span></footer>
+
+<script>
+const TOPICS = ["Notifications","Admit Card","Results","Answer Key","Syllabus","Recruitment","Cut-off"];
+
+// Official domains per tag
+const OFFICIAL = {
+  MPSC: ["mpsc.gov.in"],
+  SSC: ["ssc.nic.in"],
+  UPSC:["upsc.gov.in"],
+  RRB: [
+    "indianrailways.gov.in","rrbcdg.gov.in","rrbmumbai.gov.in","rrbahmedabad.gov.in","rrbajmer.gov.in",
+    "rrbchennai.gov.in","rrbbhopal.gov.in","rrbpatna.gov.in","rrbkolkata.gov.in","rrbald.gov.in",
+    "rrbsecunderabad.gov.in","rrbbhubaneswar.gov.in","rrbguwahati.gov.in","rrbranchi.gov.in",
+    "rrbgorakhpur.gov.in","rrbsiliguri.gov.in","rrbmalda.gov.in","rrbbilaspur.gov.in","rrbbangalore.gov.in",
+    "rrbraipur.gov.in","rrbmuzaffarpur.gov.in","rrbjammu.nic.in","rrbprayagraj.gov.in","rrbtirupati.gov.in"
+  ],
+  SBI: ["sbi.co.in"],
+  IBPS:["ibps.in"]
+};
+
+// Topic keyword rules (include + exclude) — applies to title text (lowercased)
+const TOPIC_RULES = {
+  "Notifications": {
+    include: ["notification","advertisement","recruitment","cenn","corrigendum","notice"],
+    exclude: ["admit card","call letter","hall ticket","exam date","schedule","timetable","syllabus","answer key","result","question paper","analysis","cut off","cutoff","merit list"]
+  },
+  "Admit Card": {
+    include: ["admit card","call letter","hall ticket"],
+    exclude: []
+  },
+  "Results": {
+    include: ["result","final result","marks","merit list","score card","scorecard"],
+    exclude: []
+  },
+  "Answer Key": {
+    include: ["answer key","final answer key","responses"],
+    exclude: []
+  }
+};
+
+// Tag presets for building queries (same as your previous build, generic + site queries)
+const TAG_PRESETS = {
+  MPSC: { site:"mpsc.gov.in", queries:{
+    "Notifications": ["notification","advertisement","जाहिरात","सूचना"],
+    "Admit Card": ["admit card","hall ticket"],
+    "Results": ["result","selection list","final result"],
+    "Answer Key": ["answer key","final answer key"],
+    "Syllabus": ["syllabus"],
+    "Recruitment": ["recruitment","vacancy"],
+    "Cut-off": ["cut off","cutoff"]
+  }},
+  SSC: { site:"ssc.nic.in", queries:{
+    "Notifications": ["notice","notification","advertisement"],
+    "Admit Card": ["admit card"],
+    "Results": ["result","final result","marks"],
+    "Answer Key": ["answer key","final answer key"],
+    "Syllabus": ["syllabus"],
+    "Recruitment": ["recruitment","vacancy"],
+    "Cut-off": ["cut off","cutoff"]
+  }},
+  UPSC: { site:"upsc.gov.in", queries:{
+    "Notifications": ["notice","notification","examination notice","advertisement"],
+    "Admit Card": ["e-admit card","admit card"],
+    "Results": ["result","final result","marks"],
+    "Answer Key": ["answer key"],
+    "Syllabus": ["syllabus"],
+    "Recruitment": ["recruitment"],
+    "Cut-off": ["cut off","cutoff"]
+  }},
+  RRB: { site:"(rrbcdg.gov.in OR indianrailways.gov.in OR rrb(.*).gov.in)", queries:{
+    "Notifications": ["notification","cenn","notice"],
+    "Admit Card": ["admit card","e-call letter"],
+    "Results": ["result","provisionally shortlisted","panel"],
+    "Answer Key": ["answer key","objection"],
+    "Syllabus": ["syllabus"],
+    "Recruitment": ["recruitment","vacancy"],
+    "Cut-off": ["cut off","cutoff"]
+  }},
+  SBI: { site:"sbi.co.in", queries:{
+    "Notifications": ["careers notification","advertisement","recruitment"],
+    "Admit Card": ["call letter","admit card"],
+    "Results": ["result","final result","marks"],
+    "Answer Key": ["answer key"],
+    "Syllabus": ["syllabus"],
+    "Recruitment": ["recruitment","vacancy"],
+    "Cut-off": ["cut off","cutoff"]
+  }},
+  IBPS: { site:"ibps.in", queries:{
+    "Notifications": ["notification","advertisement"],
+    "Admit Card": ["call letter","admit card"],
+    "Results": ["result","provisional allotment"],
+    "Answer Key": ["answer key"],
+    "Syllabus": ["syllabus"],
+    "Recruitment": ["recruitment","vacancy"],
+    "Cut-off": ["cut off","cutoff"]
+  }}
+};
+
+function gnewsURL(q){ return "https://news.google.com/rss/search?q="+encodeURIComponent(q)+"&hl=en-IN&gl=IN&ceid=IN:en"; }
+
+// Keep previous behavior: per-tag feeds + one generic India feed per topic
+function feedsFor(selectedTopics, selectedTags){
+  const out = [];
+  for (const tag of selectedTags){
+    const def = TAG_PRESETS[tag]; if (!def) continue;
+    for (const topic of selectedTopics){
+      const terms = def.queries[topic]||[];
+      if (!terms.length) continue;
+      const query = `site:${def.site} (${terms.join(" OR ")})`;
+      out.push({ url:gnewsURL(query), label:`${tag} — ${topic}` });
+    }
+  }
+  for (const topic of selectedTopics){
+    const extras = [...selectedTags].join(" OR ");
+    const q = `(${topic}) (${extras})`;
+    out.push({ url:gnewsURL(q), label:`India — ${topic}` });
+  }
+  return out;
+}
+
+const el = (id)=>document.getElementById(id);
+const topicsEl = el('topics'), tagsEl = el('tags'), listEl = el('list');
+const statusEl = el('status'), countEl = el('count'), searchBox = el('searchBox');
+
+const state = {
+  selectedTopics: new Set(["Notifications","Admit Card","Results"]),
+  selectedTags: new Set(["MPSC","SSC","UPSC","RRB","SBI","IBPS"]),
+  seen: new Set(JSON.parse(localStorage.getItem("seen")||"[]")),
+  items: [], timer:null
+};
+
+function pill(label, group){
+  const d = document.createElement('div'); d.className='pill'; d.textContent=label;
+  d.onclick=()=>{ const set = group==="topic"?state.selectedTopics:state.selectedTags;
+    if (set.has(label)) set.delete(label); else set.add(label);
+    d.classList.toggle('active', set.has(label)); refresh(); };
+  return d;
+}
+
+function mountPills(){
+  topicsEl.innerHTML=''; tagsEl.innerHTML='';
+  TOPICS.forEach(t=>{ const p=pill(t,'topic'); p.classList.toggle('active',state.selectedTopics.has(t)); topicsEl.appendChild(p); });
+  Object.keys(TAG_PRESETS).forEach(tag=>{ const p=pill(tag,'tag'); p.classList.toggle('active',state.selectedTags.has(tag)); tagsEl.appendChild(p); });
+}
+mountPills();
+
+async function fetchTextWithFallback(url){
+  try{ const r=await fetch(url); if(r.ok) return await r.text(); }catch{}
+  try{ const r2=await fetch("https://api.allorigins.win/raw?url="+encodeURIComponent(url)); if(r2.ok) return await r2.text(); }catch{}
+  try{ const r3=await fetch("https://cors.isomorphic-git.org/"+url); if(r3.ok) return await r3.text(); }catch{}
+  throw new Error("Fetch failed for "+url);
+}
+
+function parseRSSorAtom(txt, label){
+  const out=[]; const doc=new DOMParser().parseFromString(txt,"text/xml");
+  doc.querySelectorAll("item").forEach(it=>{
+    out.push({ title:(it.querySelector("title")?.textContent||"").trim(),
+      link:(it.querySelector("link")?.textContent||"").trim(),
+      date:new Date(it.querySelector("pubDate")?.textContent||it.querySelector("updated")?.textContent||Date.now()),
+      label });
+  });
+  doc.querySelectorAll("entry").forEach(it=>{
+    out.push({ title:(it.querySelector("title")?.textContent||"").trim(),
+      link:(it.querySelector("link")?.getAttribute("href")||"").trim(),
+      date:new Date(it.querySelector("updated")?.textContent||it.querySelector("published")?.textContent||Date.now()),
+      label });
+  });
+  return out.filter(x=>x.title && x.link);
+}
+
+function normTitle(t){ return t.toLowerCase().replace(/&#\d+;|&nbsp;|&amp;/g,' ').replace(/\s+/g,' ').replace(/[|–—-].*$/,'').trim(); }
+function dedupe(items){ const seen=new Set(), out=[]; for(const it of items){ const k=normTitle(it.title); if(seen.has(k)) continue; seen.add(k); out.push(it);} return out; }
+function ageLimitHours(){ return parseInt(el('age').value,10)||0; }
+
+function hostOf(url){
+  try{ return new URL(url).hostname.replace(/^www\./,''); }catch{ return ""; }
+}
+function inferTagByHost(url){
+  const h = hostOf(url); if(!h) return null;
+  for (const [tag, domains] of Object.entries(OFFICIAL)){
+    for (const d of domains){ if (h===d || h.endsWith("."+d)) return tag; }
+  }
+  return null;
+}
+
+function passesTopicRules(topic, title){
+  const rule = TOPIC_RULES[topic]; if(!rule) return true;
+  const t = title.toLowerCase();
+  if (rule.include.length && !rule.include.some(w=>t.includes(w))) return False=0; // quickly fail
+  if (rule.exclude.length && rule.exclude.some(w=>t.includes(w))) return false;
+  return true;
+}
+
+function applyFilters(items){
+  const hours = ageLimitHours();
+  const q = searchBox.value.trim().toLowerCase();
+  let arr = items.slice();
+
+  // Add meta: topic from label, tag from host (official)
+  arr = arr.map(x=>{
+    const parts = (x.label||"").split("—"); // e.g., "RRB — Notifications"
+    const topic = parts[1] ? parts[1].trim() : parts[0].includes("India") ? parts[1]?.trim() : parts[0].trim();
+    const tagFromLabel = parts[0] ? parts[0].trim() : null;
+    const tagFromHost = inferTagByHost(x.link);
+    return Object.assign(x, { topic: topic||"", tagGuess: tagFromHost || tagFromLabel });
+  });
+
+  // Strict handling for Notifications: must be official domain + keyword rules
+  arr = arr.filter(x=>{
+    if (x.topic==="Notifications"){
+      const officialTag = inferTagByHost(x.link);
+      if (!officialTag) return false; // not an official domain
+      if (![...state.selectedTags].includes(officialTag)) return false; // not a selected tag
+      if (!passesTopicRules("Notifications", x.title)) return false;
+      return true;
+    }
+    return true;
+  });
+
+  if (hours>0){
+    const cut = Date.now() - hours*3600*1000;
+    arr = arr.filter(x=>x.date.getTime()>=cut);
+  }
+  if (el('dedupe').checked) arr = dedupe(arr);
+  if (q) arr = arr.filter(x => x.title.toLowerCase().includes(q));
+  return arr.sort((a,b)=>b.date-a.date);
+}
+
+function render(items){
+  listEl.innerHTML=''; countEl.textContent=items.length;
+  for(const it of items){
+    const d = document.createElement('div'); d.className='item';
+    d.innerHTML = `<h3><a href="${it.link}" target="_blank" rel="noopener">${it.title}</a>
+      <span class="badge">${it.label}</span></h3>
+      <small>${it.date.toLocaleString()} · <a href="${it.link}" target="_blank" rel="noopener">open</a></small>`;
+    listEl.appendChild(d);
+  }
+}
+
+async function maybeNotify(newItems){
+  if (!newItems.length || !("Notification" in window) || Notification.permission!=="granted") return;
+  for (const it of newItems.slice(0,3)){
+    const k = it.link || normTitle(it.title);
+    if (state.seen.has(k)) continue;
+    state.seen.add(k);
+    new Notification(it.title, { body: it.label, tag: k });
+  }
+  localStorage.setItem("seen", JSON.stringify([...state.seen]));
+}
+
+async function refresh(){
+  statusEl.textContent="Loading…";
+  const topics=[...state.selectedTopics], tags=[...state.selectedTags];
+  if(!topics.length || !tags.length){
+    state.items=[]; render([]); statusEl.textContent="Choose at least 1 topic & tag"; return;
+  }
+  const feeds=feedsFor(topics, tags);
+  const results=[];
+  for (const f of feeds){
+    try { const txt=await fetchTextWithFallback(f.url); results.push(...parseRSSorAtom(txt, f.label)); }
+    catch(e){ console.warn("Feed failed:", f.url); }
+  }
+  state.items=results;
+  const filtered=applyFilters(state.items);
+  render(filtered);
+  statusEl.textContent="Updated "+new Date().toLocaleTimeString();
+  const fresh=filtered.filter(x=> (Date.now()-x.date.getTime()) < 24*3600*1000);
+  await maybeNotify(fresh);
+}
+
+el('refreshBtn').onclick=refresh;
+el('age').onchange=refresh;
+el('dedupe').onchange=refresh;
+searchBox.oninput=()=>render(applyFilters(state.items));
+el('notifyBtn').onclick=async()=>{
+  if(!("Notification" in window)) return alert("Notifications not supported.");
+  let p=Notification.permission; if(p!=="granted") p=await Notification.requestPermission();
+  alert(p==="granted"?"Notifications enabled while page is open.":"Permission denied or dismissed.");
+};
+
+el('exportBtn').onclick = ()=>{
+  const data = { selectedTopics:[...state.selectedTopics], selectedTags:[...state.selectedTags], presets: TAG_PRESETS };
+  const blob = new Blob([JSON.stringify(data,null,2)], {type:"application/json"});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download="exam-alerts-config.json"; a.click();
+};
+
+el('importBtn').onclick=()=>el('importFile').click();
+el('importFile').onchange=async(e)=>{
+  const f=e.target.files[0]; if(!f) return;
+  try{ const obj=JSON.parse(await f.text());
+    state.selectedTopics=new Set(obj.selectedTopics||TOPICS);
+    state.selectedTags=new Set(obj.selectedTags||Object.keys(TAG_PRESETS));
+    mountPills(); refresh();
+  }catch{ alert("Bad JSON"); }
+};
+
+function startTimer(){ if(state.timer) clearInterval(state.timer); if(el('autorefresh').checked) state.timer=setInterval(()=>refresh(), 5*60*1000); }
+el('autorefresh').onchange=startTimer;
+window.addEventListener('visibilitychange', ()=>{ if(!document.hidden) refresh(); });
+
+if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
+refresh(); startTimer();
+</script>
+</body>
+</html>
