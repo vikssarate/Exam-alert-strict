@@ -80,7 +80,8 @@ a{color:#9fc7ff;text-decoration:none}
 <footer class="wrap"><span class="note">Install as PWA for quick access. True push requires a server.</span></footer>
 
 <script>
-const TOPICS = ["Notifications","Admit Card","Results","Answer Key","Syllabus","Recruitment","Cut-off"];
+/* 1) Add Exam Date to topics */
+const TOPICS = ["Notifications","Admit Card","Results","Answer Key","Syllabus","Recruitment","Cut-off","Exam Date"];
 
 // Official domains per tag
 const OFFICIAL = {
@@ -98,7 +99,7 @@ const OFFICIAL = {
   IBPS:["ibps.in"]
 };
 
-// Topic keyword rules (include + exclude) — applies to title text (lowercased)
+// Topic keyword rules
 const TOPIC_RULES = {
   "Notifications": {
     include: ["notification","advertisement","recruitment","cenn","corrigendum","notice"],
@@ -115,10 +116,15 @@ const TOPIC_RULES = {
   "Answer Key": {
     include: ["answer key","final answer key","responses"],
     exclude: []
+  },
+  /* 2) Exam Date rules (for consistency if you later use them) */
+  "Exam Date": {
+    include: ["exam date","exam date out","exam date announced"],
+    exclude: []
   }
 };
 
-// Tag presets for building queries (same as your previous build, generic + site queries)
+// Tag presets for building queries (same as before)
 const TAG_PRESETS = {
   MPSC: { site:"mpsc.gov.in", queries:{
     "Notifications": ["notification","advertisement","जाहिरात","सूचना"],
@@ -178,6 +184,15 @@ const TAG_PRESETS = {
 
 function gnewsURL(q){ return "https://news.google.com/rss/search?q="+encodeURIComponent(q)+"&hl=en-IN&gl=IN&ceid=IN:en"; }
 
+/* 3) EXTRA feed for SBI Exam Date from Adda247/CareerPower/JagranJosh */
+const EXTRA_FEEDS = [
+  {
+    topic: "Exam Date",
+    label: "SBI — Exam Date (Adda247/CareerPower/JagranJosh)",
+    url: "https://news.google.com/rss/search?q=(SBI%20OR%20%22State%20Bank%20of%20India%22%20OR%20%22SBI%20Clerk%22%20OR%20%22SBI%20PO%22)%20(%22exam%20date%20out%22%20OR%20%22exam%20date%20announced%22%20OR%20%22exam%20date%22)%20(site:adda247.com%20OR%20site:careerpower.in%20OR%20site:jagranjosh.com)&hl=en-IN&gl=IN&ceid=IN:en"
+  }
+];
+
 // Keep previous behavior: per-tag feeds + one generic India feed per topic
 function feedsFor(selectedTopics, selectedTags){
   const out = [];
@@ -195,6 +210,10 @@ function feedsFor(selectedTopics, selectedTags){
     const q = `(${topic}) (${extras})`;
     out.push({ url:gnewsURL(q), label:`India — ${topic}` });
   }
+  /* 4) Append hand-added feeds that match the selected topic(s) */
+  for (const f of EXTRA_FEEDS){
+    if (selectedTopics.includes(f.topic)) out.push({ url:f.url, label:f.label });
+  }
   return out;
 }
 
@@ -203,7 +222,8 @@ const topicsEl = el('topics'), tagsEl = el('tags'), listEl = el('list');
 const statusEl = el('status'), countEl = el('count'), searchBox = el('searchBox');
 
 const state = {
-  selectedTopics: new Set(["Notifications","Admit Card","Results"]),
+  /* 5) Preselect Exam Date so the new feed shows immediately */
+  selectedTopics: new Set(["Notifications","Admit Card","Results","Exam Date"]),
   selectedTags: new Set(["MPSC","SSC","UPSC","RRB","SBI","IBPS"]),
   seen: new Set(JSON.parse(localStorage.getItem("seen")||"[]")),
   items: [], timer:null
@@ -266,7 +286,7 @@ function inferTagByHost(url){
 function passesTopicRules(topic, title){
   const rule = TOPIC_RULES[topic]; if(!rule) return true;
   const t = title.toLowerCase();
-  if (rule.include.length && !rule.include.some(w=>t.includes(w))) return False=0; // quickly fail
+  if (rule.include.length && !rule.include.some(w=>t.includes(w))) return false; /* bugfix */
   if (rule.exclude.length && rule.exclude.some(w=>t.includes(w))) return false;
   return true;
 }
