@@ -266,9 +266,25 @@ function inferTagByHost(url){
 function passesTopicRules(topic, title){
   const rule = TOPIC_RULES[topic]; if(!rule) return true;
   const t = title.toLowerCase();
-  if (rule.include.length && !rule.include.some(w=>t.includes(w))) return False=0; // quickly fail
+  if (rule.include.length && !rule.include.some(w=>t.includes(w))) return false; /* bugfix */
   if (rule.exclude.length && rule.exclude.some(w=>t.includes(w))) return false;
   return true;
+}
+
+/* === NEW: Year sanity helpers (filter out obviously old cycles) === */
+const CURRENT_YEAR = new Date().getFullYear();
+// drop items that clearly reference a year older than last year for strict topics
+function isOldByYear(topic, title, link){
+  const strictTopics = new Set(["Notifications","Recruitment","Admit Card","Results","Exam Date"]);
+  if (!strictTopics.has(topic)) return false;
+  const txt = (title + " " + (link || "")).toLowerCase();
+  const years = [...txt.matchAll(/\b(20\d{2})\b/g)]
+                  .map(m => parseInt(m[1], 10))
+                  .filter(y => y >= 2000 && y <= 2100);
+  if (years.length === 0) return false;
+  const mostRecent = Math.max(...years);
+  const limit = CURRENT_YEAR - 1;          // keep current & last year only
+  return mostRecent < limit;               // e.g., 2022 when CURRENT_YEAR=2025 → true (drop)
 }
 
 function applyFilters(items){
@@ -296,6 +312,9 @@ function applyFilters(items){
     }
     return true;
   });
+
+  // NEW: drop obviously old cycles even if Google pubDate is fresh
+  arr = arr.filter(x => !isOldByYear(x.topic, x.title, x.link));
 
   if (hours>0){
     const cut = Date.now() - hours*3600*1000;
@@ -382,4 +401,4 @@ if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catc
 refresh(); startTimer();
 </script>
 </body>
-</html> this is my index.html file update it with these changes
+</html>
